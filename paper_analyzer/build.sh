@@ -1,38 +1,31 @@
 #!/usr/bin/env bash
-# Exit on error, undefined, and pipe failures
-set -o errexit -o nounset -o pipefail
+# Exit on error
+set -o errexit
 
 echo "========================================="
 echo "PaperAIzer Build Script for Render"
 echo "========================================="
-
 echo ""
+
 echo "=== Step 1: Installing Python dependencies ==="
-pip install -r requirements.txt --quiet
-echo "✓ Dependencies installed"
+if pip install -r requirements.txt; then
+    echo "✓ Dependencies installed successfully"
+else
+    echo "✗ Failed to install dependencies"
+    exit 1
+fi
 
 echo ""
 echo "=== Step 2: Collecting static files ==="
-python manage.py collectstatic --no-input --clear --verbosity 2
-echo "✓ Static files collected"
-
-echo ""
-echo "=== Step 3: Running database migrations ==="
-python manage.py migrate --no-input --verbosity 2
-echo "✓ Migrations completed"
-
-echo ""
-echo "=== Step 4: Creating superuser (if needed) ==="
-python manage.py shell <<END
-from django.contrib.auth.models import User
-if not User.objects.filter(username='admin').exists():
-    User.objects.create_superuser('admin', 'admin@paperaizer.com', 'admin123')
-    print("✓ Superuser created")
-else:
-    print("✓ Superuser already exists")
-END
+if python manage.py collectstatic --no-input --clear 2>&1; then
+    echo "✓ Static files collected"
+else
+    echo "⚠ Static file collection had issues (continuing...)"
+fi
 
 echo ""
 echo "========================================="
-echo "Build completed successfully!"
+echo "✓ Build script completed!"
 echo "========================================="
+echo ""
+echo "NOTE: Database migrations will run in Procfile release phase"
