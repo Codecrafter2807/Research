@@ -15,20 +15,22 @@ SECRET_KEY = os.getenv(
     'django-insecure-dev-key-change-this'
 )
 
-DEBUG = False # ALWAYS FALSE on Render
-
+# DEBUG = False # ALWAYS FALSE on Render
+DEBUG = False
 ALLOWED_HOSTS = [
-    'research-13.onrender.com',
-    'localhost',
-    '127.0.0.1'
+    "research-nraq.onrender.com",
+    ".onrender.com",
+    "localhost",
+    "127.0.0.1",
+
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://research-13.onrender.com"
-]
+    "https://research-nraq.onrender.com",]
+
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'True') == 'True'
+SECURE_SSL_REDIRECT = False  # Render handles HTTPS; never redirect locally
 
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
@@ -170,10 +172,12 @@ REST_FRAMEWORK = {
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
-EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False').lower() == 'true'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@paperyzer.ai')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'noreply@paperyzer.ai')
+EMAIL_TIMEOUT = 10
 
 # ======================
 # LOGGING

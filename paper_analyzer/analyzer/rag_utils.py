@@ -1,138 +1,142 @@
+import json
 import logging
 from django.conf import settings
 from groq import Groq
 
 logger = logging.getLogger(__name__)
 
-# =========================
-# 🚀 OPTIMIZED Q&A PIPELINE
-# =========================
-# def rag_pipeline(text, query="Summarize this research paper"):
-#     """
-#     Simplified Q&A pipeline for research papers.
-#     Instead of slow local embeddings (RAG), we use GROQ's large context window (128k)
-#     directly. This provides 10x faster responses for papers up to 50k characters.
-#     """
+# def rag_pipeline(text: str, query: str = "Summarize this research paper"):
+#     """Main fast Groq analysis function used by your views"""
 #     try:
+#         text = text or ""
+#         if len(text.strip()) < 20:
+#             return "Not enough content in the document to analyze."
+
 #         client = Groq(api_key=settings.GROQ_API_KEY)
-        
-#         # Limit text to ~30k chars to ensure we stay well within context limits
-#         # while preserving most of the paper's content.
-#         context = text[:35000]
-        
+
+#         # Take beginning + end for better context
+#         # context = (text[:25000] + "\n...\n" + text[-15000:]) if len(text) > 40000 else text
+
+#         MAX_CHARS = 12000   # safe limit
+
+#         if len(text) > MAX_CHARS:
+#                 context = text[:6000] + "\n...\n" + text[-6000:]
+#         else:
+#             context = text
+
 #         prompt = f"""
-#         Analyze the research paper context provided below and answer the specific question. 
-#         If the information is not in the context, use your general knowledge but mention it's not explicitly in the paper.
-        
-#         CONTEXT:
-#         {context}
-        
-#         QUESTION:
-#         {query}
-        
-#         INSTRUCTIONS:
-#         - Provide a clear, detailed, and structured answer.
-#         - Use bullet points for lists.
-#         - Be concise but thorough.
-#         """
-        
+# You are an expert research assistant.
+
+# CONTEXT:
+# {context}
+
+# QUESTION:
+# {query}
+
+# INSTRUCTIONS:
+# - Provide a clear, structured answer.
+# - Use bullet points where helpful.
+# - If information is not in the context, clearly mention it.
+# """
+
 #         response = client.chat.completions.create(
 #             model="llama-3.3-70b-versatile",
 #             messages=[
-#                 {"role": "system", "content": "You are an expert research assistant specialized in academic paper analysis."},
+#                 {"role": "system", "content": "You are an expert academic research assistant."},
 #                 {"role": "user", "content": prompt}
 #             ],
 #             temperature=0.3,
-#             max_tokens=1500
+#             max_tokens=2000,
 #         )
-        
-#         return response.choices[0].message.content
-        
+
+#         # return response.choices[0].message.content
+#         return {
+#              "summary": response.choices[0].message.content
+#             }
 #     except Exception as e:
-#         logger.error(f"GROQ Q&A Pipeline Error: {str(e)}")
-#         return f"I encountered an error while analyzing the paper: {str(e)}"
+#         logger.error("GROQ Pipeline Error", exc_info=True)
+#         return f"Error analyzing the paper: {str(e)}"
 
-from groq import Groq
-from django.conf import settings
-import logging
-
-logger = logging.getLogger(__name__)
-
-def rag_pipeline(text, query="Summarize this research paper"):
-    """
-    Fast Groq-based RAG pipeline for research paper Q&A.
-    """
-
+def rag_pipeline(text: str, query: str = "Summarize this research paper"):
     try:
-        # SAFE fallback for None
         text = text or ""
-
         if len(text.strip()) < 20:
-            return "Not enough content in document to analyze."
+            return {"summary": "Not enough content in the document to analyze."}
 
         client = Groq(api_key=settings.GROQ_API_KEY)
 
-        # limit context safely
-        # context = text[:35000]
-        text = text[-35000:] + text[:35000]
+        # ✅ SAFE CONTEXT LIMIT
+        MAX_CHARS = 3000
+        context = text[:MAX_CHARS]
+
         prompt = f"""
-        You are an expert research assistant.
+You are an expert research assistant.
 
-        CONTEXT:
-        {context}
+Analyze the research paper and provide:
+- Summary
+- Key Contributions
+- Methodology
+- Results
+- Limitations
 
-        QUESTION:
-        {query}
-
-        INSTRUCTIONS:
-        - Answer only based on context when possible.
-        - Be structured and clear.
-        - Use bullet points if needed.
-        - If not found in context, mention it clearly.
-        """
+CONTEXT:
+{context}
+"""
 
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert academic research assistant."
-                },
+                {"role": "system", "content": "You are an expert academic research assistant. Be concise."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            max_tokens=2000
+            max_tokens=500,
         )
 
-        return response.choices[0].message.content
+        return {
+            "summary": response.choices[0].message.content
+        }
 
-    # except Exception as e:
-    #     logger.error(f"GROQ Q&A Pipeline Error: {str(e)}", exc_info=True)
-    #     return "Sorry, I encountered an error while analyzing this document."
     except Exception as e:
-        logger.error("GROQ Q&A Pipeline Error", exc_info=True)
-
-    return {
-        "success": False,
-        "error": "GROQ_PIPELINE_FAILED",
-        "message": "Unable to process document",
-        "details": str(e)  # only for backend logs or debug mode
+        logger.error("GROQ Pipeline Error", exc_info=True)
+        return {
+            "summary": f"Error analyzing the paper: {str(e)}"
+        }
+def analyze_text_with_groq(text: str, prompt: str = "Summarize this:") -> dict:
+    """Returns a dict with structured analysis keys — never a plain str."""
+    word_count = len(text.split())
+    unique_words = len(set(text.split()))
+    _safe_dict = lambda summary: {
+        "summary": summary, "abstract": "", "keywords": [], "methodology": [],
+        "technologies": [], "goal": "", "impact": "", "publication_year": "",
+        "authors": [], "research_gaps": [], "conclusion": "",
+        "statistics": {"word_count": word_count, "unique_words": unique_words},
     }
-# Keep these stubs for compatibility if needed elsewhere, but they aren't used for the main speedup
-def chunk_text(text, chunk_size=500, overlap=100):
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-    return chunks
-
-def get_embeddings(chunks):
-    return []
-
-def create_faiss_index(embeddings):
-    return None
-
-def search_chunks(query, chunks, index, top_k=5):
-    return chunks[:top_k]
+    try:
+        client = Groq(api_key=settings.GROQ_API_KEY)
+        context = text[:2000]
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "Return ONLY valid JSON. Keys: summary, abstract, keywords(array), methodology(array), technologies(array), goal, impact, publication_year, authors(array), research_gaps(array), conclusion. No markdown."},
+                {"role": "user", "content": f"Analyze:\n\n{context}"},
+            ],
+            temperature=0.1,
+            max_tokens=400,
+        )
+        raw_content = response.choices[0].message.content.strip()
+        stripped = raw_content
+        if stripped.startswith("```"):
+            stripped = stripped.split("\n", 1)[-1]
+            stripped = stripped[:stripped.rfind("```")].strip() if "```" in stripped else stripped
+        try:
+            data = json.loads(stripped)
+            if not isinstance(data, dict):
+                return _safe_dict(stripped[:500])
+            data["statistics"] = {"word_count": word_count, "unique_words": unique_words}
+            return data
+        except json.JSONDecodeError:
+            return _safe_dict(raw_content[:500])
+    except Exception as e:
+        logger.error(f"analyze_text_with_groq Error: {str(e)}", exc_info=True)
+        return _safe_dict(f"Error: {str(e)}")

@@ -14,24 +14,28 @@ from django.db.models import Q, Avg
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import User
 from django.core.files.storage import default_storage
 from django.conf import settings
 from .rag_utils import rag_pipeline
 from groq import Groq
+# from django.views.decorators.csrf import csrf_exempt
+from django.core.files.uploadedfile import UploadedFile
+
 
 from .models import Document, AnalysisResult, PlagiarismCheck, AnalysisFeedback, ComparisonResult
 from .plagiarism import local_library_similarity
-from .forms import DocumentUploadForm, CustomRegistrationForm
+from .forms import DocumentUploadForm, CustomRegistrationForm, EmailLoginForm
 from .ml_model import ml_processor
 from .pdf_processor import get_pdf_processor
 from .url_scraper import url_scraper
 from .export_manager import export_manager
+# from analyzer.utils.groq import analyze_text_with_groq
+from analyzer.rag_utils import analyze_text_with_groq
 
 logger = logging.getLogger(__name__)
 
-ANALYSIS_TEXT_MAX = int(os.getenv("ANALYSIS_TEXT_CAP", "50000"))
+ANALYSIS_TEXT_MAX = int(os.getenv("ANALYSIS_TEXT_CAP", "5000"))
 TITLE_SAMPLE_CHARS = int(os.getenv("TITLE_SAMPLE_CHARS", "12000"))
 MAX_PDF_UPLOAD_BYTES = int(os.getenv("MAX_PDF_UPLOAD_MB", "45")) * 1024 * 1024
 MAX_PDF_STORE_BYTES = int(os.getenv("MAX_STORE_PDF_MB", "16")) * 1024 * 1024
@@ -126,24 +130,40 @@ MAX_PDF_STORE_BYTES = int(os.getenv("MAX_STORE_PDF_MB", "16")) * 1024 * 1024
 
 #     return True, None
 
+# import logging
+
+# logger = logging.getLogger(__name__)
+
+MAX_PDF_UPLOAD_BYTES = 52 * 1024 * 1024  # 52 MB - keep consistent with settings.py
+
 def validate_pdf_file(file):
+    """Validate uploaded PDF file safely"""
     if not file:
+        logger.warning("validate_pdf_file: No file provided")
         return False, "No file provided"
 
-    if not hasattr(file, 'name') or not file.name.lower().endswith('.pdf'):
-        return False, "Only PDF files allowed"
+    # Check if it's a real UploadedFile object
+    if not hasattr(file, 'name') or not hasattr(file, 'size'):
+        logger.warning("validate_pdf_file: Invalid file object")
+        return False, "Invalid file uploaded"
 
-    # ✅ Safe size check
+    # Check extension
+    if not file.name.lower().endswith('.pdf'):
+        logger.warning(f"validate_pdf_file: Not a PDF - filename: {file.name}")
+        return False, "Only PDF files are allowed"
+
+    # Check size
     file_size = getattr(file, 'size', 0)
-
     if file_size == 0:
+        logger.warning("validate_pdf_file: Empty file")
         return False, "Uploaded file is empty"
 
     if file_size > MAX_PDF_UPLOAD_BYTES:
-        return False, "File too large"
+        logger.warning(f"validate_pdf_file: File too large - size: {file_size / (1024*1024):.2f} MB")
+        return False, f"File too large (max {MAX_PDF_UPLOAD_BYTES // (1024*1024)} MB)"
 
+    logger.info(f"validate_pdf_file: File passed validation - {file.name} ({file_size / (1024*1024):.2f} MB)")
     return True, None
-
 # =========================
 # HOME
 # =========================
@@ -159,6 +179,40 @@ def home(request):
 # =========================
 # LOGIN
 # =========================
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
+    form = EmailLoginForm(request, data=request.POST or None)
+
+    if request.method == 'POST':
+        if form.is_valid():
+            user = form.get_user()
+            login(request, user)
+            return redirect('dashboard')
+
+    return render(request, 'analyzer/login.html', {'form': form})
+
+
+# def login_view(request):
+#     if request.user.is_authenticated:
+#         return redirect('dashboard')
+
+#     form = AuthenticationForm(request, data=request.POST or None)
+
+#     if request.method == 'POST':
+#         if form.is_valid():
+#             user = form.get_user()
+#             login(request, user)
+#             return redirect('dashboard')
+#         else:
+#             return render(request, 'analyzer/login.html', {
+#                 'form': form,
+#                 'error': 'Invalid username or password'
+#             })
+
+#     return render(request, 'analyzer/login.html', {'form': form})
+
 # def login_view(request):
 #     if request.user.is_authenticated:
 #         return redirect('dashboard')
@@ -170,18 +224,18 @@ def home(request):
 #         return redirect('dashboard')
 
 #     return render(request, 'analyzer/login.html', {'form': form})
-def login_view(request):
-    if request.user.is_authenticated:
-        return redirect('dashboard')
+# def login_view(request):
+#     if request.user.is_authenticated:
+#         return redirect('dashboard')
 
-    form = AuthenticationForm(request, data=request.POST or None)
+#     form = AuthenticationForm(request, data=request.POST or None)
 
-    if request.method == 'POST' and form.is_valid():
-        login(request, form.get_user())
-        return redirect('dashboard')
+#     if request.method == 'POST' and form.is_valid():
+#         login(request, form.get_user())
+#         next_url = request.POST.get('next') or request.GET.get('next')
+#         return redirect(next_url if next_url else 'dashboard')  # ✅ respects ?next=
 
-    return render(request, 'analyzer/login.html', {'form': form})
-
+#     return render(request, 'analyzer/login.html', {'form': form})
 # =========================
 # REGISTER
 # =========================
@@ -192,9 +246,13 @@ def register_view(request):
     form = CustomRegistrationForm(request.POST or None)
 
     if request.method == 'POST' and form.is_valid():
-        user = form.save()
-        login(request, user)
-        return redirect('dashboard')
+        try:
+            from django.db import IntegrityError
+            user = form.save()
+            login(request, user)
+            return redirect('dashboard')
+        except IntegrityError:
+            form.add_error('email', 'An account with this email already exists.')
 
     return render(request, 'analyzer/register.html', {'form': form})
 
@@ -280,43 +338,55 @@ def logout_view(request):
 #         logger.error(e, exc_info=True)
 #         return JsonResponse({'error': str(e)}, status=500)
 
+# from django.views.decorators.csrf import csrf_exempt
+from django.core.files.uploadedfile import UploadedFile
 
+# logger = logging.getLogger(__name__)
+
+@csrf_exempt
 def analyze_document(request):
+    """Main document analysis endpoint - Handles PDF upload and URL input"""
+    
     if not request.user.is_authenticated:
         return JsonResponse({'error': 'Login required'}, status=401)
 
+    # Log incoming request for easier debugging
+    logger.info(f"Analyze request received - Method: {request.method}, Content-Type: {request.content_type}")
+    logger.info(f"POST keys: {list(request.POST.keys())}")
+    logger.info(f"FILES keys: {list(request.FILES.keys())}")
+
     try:
-        input_type = request.POST.get('input_type', 'pdf')
+        input_type = request.POST.get('input_type', 'pdf').strip().lower()
+
         content = None
         title = "Analyzed Document"
         document_input_type = 'pdf'
         url_source = None
-        extracted_images_data = []
 
         # =========================
-        # 📄 PDF INPUT
+        # 📄 PDF UPLOAD
         # =========================
         if input_type == 'pdf':
-            uploaded_file = request.FILES.get('pdf_file')
+            uploaded_file: UploadedFile = request.FILES.get('pdf_file')
 
             if not uploaded_file:
-                return JsonResponse({'error': 'No PDF uploaded'}, status=400)
+                return JsonResponse({'error': 'No PDF file uploaded'}, status=400)
 
-            is_valid, error = validate_pdf_file(uploaded_file)
+            # Validate file
+            is_valid, error_msg = validate_pdf_file(uploaded_file)
             if not is_valid:
-                return JsonResponse({'error': error}, status=400)
+                logger.warning(f"PDF validation failed: {error_msg}")
+                return JsonResponse({'error': error_msg}, status=400)
 
+            # Process PDF
             processor = get_pdf_processor()
             result = processor.extract_text(uploaded_file)
 
             if not result.get('success'):
-                return JsonResponse({'error': 'PDF extraction failed'}, status=400)
+                logger.error(f"PDF extraction failed: {result.get('error')}")
+                return JsonResponse({'error': 'Failed to extract text from PDF'}, status=400)
 
             content = result.get('text', '')[:ANALYSIS_TEXT_MAX]
-            document_input_type = 'pdf'
-
-            # ❌ FIX: extract_images not available → skip safely
-            extracted_images_data = []
 
         # =========================
         # 🌐 URL INPUT
@@ -329,50 +399,45 @@ def analyze_document(request):
 
             try:
                 result = url_scraper.scrape(url_input)
-
                 if not result.get('success'):
-                    return JsonResponse({
-                        'error': f'Failed to fetch URL: {result.get("error", "Unknown error")}'
-                    }, status=400)
+                    error = result.get("error", "Unknown error")
+                    logger.warning(f"URL scraping failed: {error}")
+                    return JsonResponse({'error': f'Failed to scrape URL: {error}'}, status=400)
 
-                # ✅ FIXED KEY
                 content = result.get('text', '')[:ANALYSIS_TEXT_MAX]
-
                 url_source = url_input
                 document_input_type = 'url'
 
             except Exception as e:
-                logger.error(f"URL scraping error: {e}")
-                return JsonResponse({
-                    'error': f'Failed to fetch URL content: {str(e)}'
-                }, status=400)
+                logger.error(f"URL scraping exception: {e}", exc_info=True)
+                return JsonResponse({'error': f'URL processing failed: {str(e)}'}, status=400)
 
         else:
-            return JsonResponse({'error': 'Invalid input type'}, status=400)
+            return JsonResponse({'error': 'Invalid input type. Use "pdf" or "url"'}, status=400)
 
         # =========================
-        # 📏 VALIDATION
+        # CONTENT VALIDATION
         # =========================
         if not content or len(content.strip()) < 30:
             return JsonResponse({
-                'error': 'Not enough text content for analysis (min 30 chars)'
+                'error': 'Not enough content extracted from the document (minimum 30 characters)'
             }, status=400)
 
         # =========================
-        # 🏷 TITLE
+        # GENERATE TITLE
         # =========================
-        for line in content.split('\n'):
+        for line in content.splitlines():
             line = line.strip()
             if 5 < len(line) < 200:
                 title = line[:150]
                 break
 
-        if not title or title == "Analyzed Document":
+        if title == "Analyzed Document":
             words = content.split()
-            title = ' '.join(words[:10]) if words else "Analyzed Document"
+            title = ' '.join(words[:12]) if words else "Analyzed Document"
 
         # =========================
-        # 💾 SAVE DOCUMENT
+        # SAVE DOCUMENT
         # =========================
         document = Document.objects.create(
             user=request.user,
@@ -384,16 +449,54 @@ def analyze_document(request):
         )
 
         # =========================
-        # 🤖 AI ANALYSIS
+               # =========================
+        # AI ANALYSIS (Fixed - No more crash)
         # =========================
         try:
             analysis_data = analyze_text_with_groq(content)
+            logger.info("✅ Groq analysis completed successfully")
         except Exception as e:
-            logger.warning(f"Groq failed → fallback ML: {e}")
-            analysis_data = ml_processor.full_analysis(content)
+            logger.warning(f"Groq failed: {e}")
+            try:
+                analysis_data = ml_processor.full_analysis(content)
+                logger.info("✅ Used fallback ML analysis")
+            except Exception as fallback_e:
+                logger.error(f"Fallback ML also failed: {fallback_e}")
+                # Safe default values
+                analysis_data = {
+                    'summary': 'Analysis could not be completed due to technical issues.',
+                    'abstract': '',
+                    'keywords': [],
+                    'methodology': [],
+                    'technologies': [],
+                    'goal': '',
+                    'impact': '',
+                    'publication_year': '',
+                    'authors': [],
+                    'statistics': {'word_count': len(content.split()), 'unique_words': 0},
+                    'research_gaps': [],
+                    'conclusion': ''
+                }
 
+        # Extra safety check (very important)
+        if isinstance(analysis_data, str):
+            logger.warning("Fallback returned string instead of dictionary")
+            analysis_data = {
+                'summary': str(analysis_data)[:1000],
+                'abstract': '',
+                'keywords': [],
+                'methodology': [],
+                'technologies': [],
+                'goal': '',
+                'impact': '',
+                'publication_year': '',
+                'authors': [],
+                'statistics': {'word_count': len(content.split()), 'unique_words': 0},
+                'research_gaps': [],
+                'conclusion': ''
+            }
         # =========================
-        # 🔍 PLAGIARISM
+        # PLAGIARISM CHECK
         # =========================
         plagiarism = local_library_similarity(document.id, content, user=request.user)
 
@@ -403,62 +506,45 @@ def analyze_document(request):
         )
 
         # =========================
-        # 📊 EXTRACTIONS
-        # =========================
-        extracted_links = getattr(ml_processor, 'extract_links', lambda x: [])(content)
-        references = getattr(ml_processor, 'extract_references', lambda x: [])(content)
-
-        keywords_detected = analysis_data.get('keywords', [])
-        methodology_detected = analysis_data.get('methodology', [])
-        technologies_detected = analysis_data.get('technologies', [])
-
-        try:
-            datasets = getattr(ml_processor, 'extract_datasets', lambda x: {})(content)
-            dataset_names = datasets.get('names', []) or analysis_data.get('datasets', [])
-            dataset_links = datasets.get('links', [])
-        except:
-            dataset_names, dataset_links = [], []
-
-        extras = {
-            'plagiarism': plagiarism,
-            'research_gaps': analysis_data.get('research_gaps', []),
-            'visual_assets': getattr(ml_processor, 'extract_visuals', lambda x: {})(content),
-            'methodology_summary': analysis_data.get('summary', '')[:500],
-            'conclusion': analysis_data.get('conclusion', ''),
-            'extracted_images': extracted_images_data,
-        }
-
-        # =========================
-        # 💾 SAVE ANALYSIS
+        # SAVE ANALYSIS RESULT
         # =========================
         analysis = AnalysisResult.objects.create(
             document=document,
             summary=analysis_data.get('summary', ''),
             abstract=analysis_data.get('abstract', ''),
-            keywords=keywords_detected,
-            methodology=methodology_detected,
-            technologies=technologies_detected,
+            keywords=analysis_data.get('keywords', []),
+            methodology=analysis_data.get('methodology', []),
+            technologies=analysis_data.get('technologies', []),
             goal=analysis_data.get('goal', ''),
             impact=analysis_data.get('impact', ''),
             publication_year=analysis_data.get('publication_year', ''),
             authors=analysis_data.get('authors', []),
             word_count=analysis_data.get('statistics', {}).get('word_count', 0),
             unique_words=analysis_data.get('statistics', {}).get('unique_words', 0),
-            extracted_links=extracted_links,
-            references=references,
-            dataset_names=dataset_names,
-            dataset_links=dataset_links,
-            extras=extras,
+            extracted_links=getattr(ml_processor, 'extract_links', lambda x: [])(content),
+            references=getattr(ml_processor, 'extract_references', lambda x: [])(content),
+            extras={
+                'plagiarism': plagiarism,
+                'research_gaps': analysis_data.get('research_gaps', []),
+                'conclusion': analysis_data.get('conclusion', ''),
+            }
         )
+
+        logger.info(f"Document analysis completed successfully for user {request.user.id} - Doc ID: {document.id}")
 
         return JsonResponse({
             'success': True,
+            'message': 'Analysis completed successfully',
+            'document_id': document.id,
             'redirect_url': f'/result/{document.id}/'
         })
 
     except Exception as e:
-        logger.error(e, exc_info=True)
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error(f"Unexpected error in analyze_document: {e}", exc_info=True)
+        return JsonResponse({
+            'error': 'An unexpected error occurred during analysis. Please try again.'
+        }, status=500)
+
 
 # =========================
 # 📊 STUB FUNCTIONS (TODO)
@@ -466,11 +552,69 @@ def analyze_document(request):
 
 @login_required
 def profile(request):
-    """User profile page"""
+    """User profile page with edit functionality"""
+    from .models import UserProfile, AnalysisResult, PlagiarismCheck
+    from django.db.models import Sum, Avg
+    from collections import Counter
+
+    user = request.user
+    profile_obj, _ = UserProfile.objects.get_or_create(user=user)
+
     if request.method == 'POST':
-        # TODO: Update profile logic
-        pass
-    return render(request, 'analyzer/profile.html')
+        # Update User fields
+        user.first_name = request.POST.get('first_name', user.first_name).strip()
+        user.last_name = request.POST.get('last_name', user.last_name).strip()
+        new_email = request.POST.get('email', user.email).strip().lower()
+
+        if new_email != user.email:
+            if User.objects.filter(email__iexact=new_email).exclude(pk=user.pk).exists():
+                from django.contrib import messages as msg
+                msg.error(request, 'That email is already in use by another account.')
+                return redirect('profile')
+            user.email = new_email
+            user.username = new_email  # keep username == email
+
+        user.save()
+
+        # Update UserProfile fields
+        profile_obj.bio = request.POST.get('bio', '').strip()[:500]
+        profile_obj.institution = request.POST.get('institution', '').strip()[:200]
+        profile_obj.research_interests = request.POST.get('research_interests', '').strip()[:300]
+        profile_obj.website = request.POST.get('website', '').strip()
+
+        if 'avatar' in request.FILES:
+            profile_obj.avatar = request.FILES['avatar']
+
+        profile_obj.save()
+
+        from django.contrib import messages as msg
+        msg.success(request, 'Profile updated successfully!')
+        return redirect('profile')
+
+    # Stats for display
+    documents = Document.objects.filter(user=user)
+    total_papers = documents.count()
+    total_words = documents.aggregate(Sum('word_count'))['word_count__sum'] or 0
+
+    analysis_results = AnalysisResult.objects.filter(document__user=user)
+    all_keywords = []
+    for a in analysis_results:
+        all_keywords.extend(a.keywords or [])
+    unique_keywords = len(set(all_keywords))
+
+    plagiarism_checks = PlagiarismCheck.objects.filter(document__in=documents)
+    avg_plagiarism = plagiarism_checks.aggregate(Avg('similarity_score'))['similarity_score__avg']
+    avg_plagiarism = round(avg_plagiarism * 100, 1) if avg_plagiarism else 0
+
+    return render(request, 'analyzer/profile.html', {
+        'profile': profile_obj,
+        'documents': documents.order_by('-created_at'),
+        'total_papers': total_papers,
+        'total_words': total_words,
+        'unique_keywords': unique_keywords,
+        'avg_plagiarism': avg_plagiarism,
+        'member_since': user.date_joined,
+    })
 
 
 @login_required
@@ -479,58 +623,83 @@ def dashboard(request):
     from django.utils import timezone
     from django.db.models import Count, Avg, Sum
     from datetime import timedelta
-    
+    import json as _json
+
     user = request.user
-    
+
     # Total papers
     total_papers = Document.objects.filter(user=user).count()
-    
+
     # Recent activity for sidebar
     recent_activity = Document.objects.filter(user=user).order_by('-created_at')[:5]
     documents = Document.objects.filter(user=user)
-    
+
     # Total words
     total_words = documents.aggregate(Sum('word_count'))['word_count__sum'] or 0
-    
+
     # Average words per paper
     avg_words = total_words / total_papers if total_papers > 0 else 0
-    
+
     # This month papers
     now = timezone.now()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     this_month = Document.objects.filter(user=user, created_at__gte=month_start).count()
-    
+
     # Plagiarism stats
     from .models import PlagiarismCheck
     user_docs = Document.objects.filter(user=user)
     plagiarism_checks = PlagiarismCheck.objects.filter(document__in=user_docs)
-    
+
     avg_plagiarism = plagiarism_checks.aggregate(Avg('similarity_score'))['similarity_score__avg']
     avg_plagiarism = round(avg_plagiarism * 100, 1) if avg_plagiarism else 0
-    
+
     low_plag = plagiarism_checks.filter(similarity_score__lt=0.25).count()
     high_plag = plagiarism_checks.filter(similarity_score__gte=0.50).count()
-    
+
     # Top keywords
     from .models import AnalysisResult
     analysis_results = AnalysisResult.objects.filter(document__user=user)
     all_keywords = []
     for a in analysis_results:
         all_keywords.extend(a.keywords or [])
-    
+
     from collections import Counter
     keyword_counts = Counter(all_keywords)
     top_keywords = keyword_counts.most_common(10)
-    
+
     # Unique keywords count
     unique_keywords = len(set(all_keywords))
-    
+
     # Member since
     member_since = user.date_joined
-    
-    # User full name
-    user_full_name = user.get_full_name() or user.username
-    
+
+    # User display name — first_name preferred, fallback to email prefix
+    display_name = (user.first_name or '').strip() or user.email.split('@')[0]
+
+    # Avatar initial — use first_name initial, fallback to email
+    avatar_initial = ((user.first_name or '').strip() or user.email)[0].upper()
+
+    # Monthly chart data — papers per month for last 6 months
+    chart_labels = []
+    chart_data = []
+    for i in range(5, -1, -1):
+        month_date = (now.replace(day=1) - timedelta(days=i * 28)).replace(day=1)
+        if month_date.month == 12:
+            next_month = month_date.replace(year=month_date.year + 1, month=1)
+        else:
+            next_month = month_date.replace(month=month_date.month + 1)
+        count = Document.objects.filter(
+            user=user,
+            created_at__gte=month_date,
+            created_at__lt=next_month
+        ).count()
+        chart_labels.append(month_date.strftime('%b %Y'))
+        chart_data.append(count)
+
+    # UserProfile
+    from .models import UserProfile
+    profile_obj, _ = UserProfile.objects.get_or_create(user=user)
+
     return render(request, 'analyzer/dashboard.html', {
         'total_papers': total_papers,
         'avg_plagiarism': avg_plagiarism,
@@ -544,7 +713,12 @@ def dashboard(request):
         'high_plag': high_plag,
         'top_keywords': top_keywords,
         'member_since': member_since,
-        'user_full_name': user_full_name,
+        'user_full_name': display_name,
+        'display_name': display_name,
+        'avatar_initial': avatar_initial,
+        'chart_labels': chart_labels,
+        'chart_data': chart_data,
+        'profile': profile_obj,
     })
 
 
@@ -606,26 +780,36 @@ def contact(request):
 def forgot_password(request):
     """Forgot password page - Send OTP"""
     from .otp_utils import create_and_send_otp
-    
+
     if request.method == 'POST':
         email = request.POST.get('email', '').strip()
-        
-        # Check if user exists
+
+        if not email:
+            messages.error(request, 'Please enter your email address.')
+            return redirect('forgot_password')
+
         try:
             User.objects.get(email=email)
-            # Create and send OTP
-            _, email_sent = create_and_send_otp(email)
             
+            # Send OTP with better error handling
+            success, email_sent = create_and_send_otp(email)
+
             if email_sent:
                 request.session['reset_email'] = email
-                messages.success(request, f'OTP sent to {email}. Please check your inbox.')
+                messages.success(request, f'OTP sent successfully to {email}. Please check your inbox.')
                 return redirect('verify_otp')
             else:
-                messages.error(request, 'Failed to send OTP because of an email server error. Please try again.')
+                messages.error(request, 'Could not send OTP. Please try again later or contact support.')
+                return redirect('forgot_password')
+
         except User.DoesNotExist:
-            messages.error(request, 'Error: No account found with this email address.')
+            messages.error(request, 'No account found with this email address.')
             return redirect('forgot_password')
-    
+        except Exception as e:
+            logger.error(f"Forgot password error: {e}", exc_info=True)
+            messages.error(request, 'An error occurred while sending OTP. Please try again.')
+            return redirect('forgot_password')
+
     return render(request, 'analyzer/forgot_password.html')
 
 
@@ -724,12 +908,10 @@ def ask_question(request, document_id):
         
         # Use the RAG pipeline to get an answer
         answer = rag_pipeline(document.content, question)
+        if isinstance(answer, dict):
+            answer = answer.get('summary', str(answer))
         
-        return JsonResponse({
-            'success': True,
-            'question': question,
-            'answer': answer
-        })
+        return JsonResponse({'success': True, 'question': question, 'answer': answer})
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON data'}, status=400)
     except Exception as e:
@@ -995,13 +1177,25 @@ def export_as_pdf(request, document, analysis):
 
 
 def export_as_txt(document, analysis):
-    """Export analysis as text file"""
+    """Export analysis as text file with citation"""
     lines = []
     lines.append("=" * 60)
     lines.append(document.title or "Untitled Document")
     lines.append("=" * 60)
     lines.append("")
-    
+
+    # Citation block
+    lines.append("CITATION")
+    lines.append("-" * 40)
+    authors = ", ".join(analysis.authors) if analysis and analysis.authors else "Unknown Author"
+    year = analysis.publication_year if analysis and analysis.publication_year else "n.d."
+    title = document.title or "Untitled"
+    url = f" Retrieved from {document.url}" if document.url else ""
+    lines.append(f"APA:     {authors} ({year}). {title}.{url}")
+    lines.append(f"MLA:     {(analysis.authors[0] if analysis and analysis.authors else 'Unknown')}. \"{title}.\" {year}.{url}")
+    lines.append(f"Chicago: {authors}. \"{title}.\" {year}.{url}")
+    lines.append("")
+
     if analysis:
         if analysis.authors:
             lines.append(f"Authors: {', '.join(analysis.authors)}")
@@ -1009,50 +1203,50 @@ def export_as_txt(document, analysis):
             lines.append(f"Publication Year: {analysis.publication_year}")
         lines.append(f"Word Count: {analysis.word_count}")
         lines.append("")
-        
+
         if analysis.abstract:
             lines.append("ABSTRACT")
             lines.append("-" * 40)
             lines.append(analysis.abstract)
             lines.append("")
-        
+
         if analysis.summary:
             lines.append("SUMMARY")
             lines.append("-" * 40)
             lines.append(analysis.summary)
             lines.append("")
-        
+
         if analysis.keywords:
             lines.append("KEYWORDS")
             lines.append("-" * 40)
             lines.append(", ".join(analysis.keywords))
             lines.append("")
-        
+
         if analysis.methodology:
             lines.append("METHODOLOGY")
             lines.append("-" * 40)
             for method in analysis.methodology:
                 lines.append(f"• {method}")
             lines.append("")
-        
+
         if analysis.technologies:
             lines.append("TECHNOLOGIES")
             lines.append("-" * 40)
             lines.append(", ".join(analysis.technologies))
             lines.append("")
-        
+
         if analysis.impact:
             lines.append("IMPACT & CONTRIBUTIONS")
             lines.append("-" * 40)
             lines.append(analysis.impact)
             lines.append("")
-        
+
         if analysis.goal:
             lines.append("RESEARCH GOAL")
             lines.append("-" * 40)
             lines.append(analysis.goal)
             lines.append("")
-    
+
     content = "\n".join(lines)
     return HttpResponse(content, content_type='text/plain')
 
@@ -1084,14 +1278,26 @@ def export_as_csv(document, analysis):
 
 
 def export_as_json(document, analysis):
-    """Export analysis as JSON"""
+    """Export analysis as JSON with citation"""
     import json
-    
+
+    authors = analysis.authors if analysis and analysis.authors else []
+    year = analysis.publication_year if analysis and analysis.publication_year else "n.d."
+    title = document.title or "Untitled"
+    url_str = document.url or ""
+    author_str = ", ".join(authors) if authors else "Unknown Author"
+    first_author = authors[0] if authors else "Unknown"
+
     data = {
         'title': document.title,
         'created_at': document.created_at.isoformat() if document.created_at else None,
+        'citation': {
+            'apa': f"{author_str} ({year}). {title}.{' Retrieved from ' + url_str if url_str else ''}",
+            'mla': f"{first_author}. \"{title}.\" {year}.{' ' + url_str if url_str else ''}",
+            'chicago': f"{author_str}. \"{title}.\" {year}.{' ' + url_str if url_str else ''}",
+        },
     }
-    
+
     if analysis:
         data.update({
             'authors': analysis.authors or [],
@@ -1107,7 +1313,7 @@ def export_as_json(document, analysis):
             'references': analysis.references or [],
             'extracted_links': analysis.extracted_links or [],
         })
-    
+
     return JsonResponse(data, json_dumps_params={'indent': 2})
 
 

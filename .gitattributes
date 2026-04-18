@@ -1,0 +1,36 @@
+# Auto-detect text files and normalize line endings to LF
+* text=auto
+
+# Shell scripts - always use LF
+*.sh eol=lf
+*.bash eol=lf
+
+# Python files - always use LF
+*.py eol=lf
+*.pyw eol=lf
+
+# Web files - always use LF
+*.html eol=lf
+*.htm eol=lf
+*.js eol=lf
+*.css eol=lf
+*.json eol=lf
+*.yml eol=lf
+*.yaml eol=lf
+*.xml eol=lf
+*.md eol=lf
+
+# Windows batch files - use CRLF
+*.bat eol=crlf
+*.cmd eol=crlf
+*.ps1 eol=crlf
+
+# Binary files should not have line ending conversions
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.db binary
