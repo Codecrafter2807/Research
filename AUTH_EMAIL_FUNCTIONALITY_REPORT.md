@@ -1,53 +1,306 @@
-# Authentication & Email Functionality Report
+# Email & OTP Functionality Report
 
-**Date:** April 18, 2026  
-**Status:** ✅ WORKING (with configuration requirements)
+## 🚨 Current Status: NOT WORKING on Render
 
----
+**Problem:** OTP emails are not being sent to users on your Render deployment.
 
-## Executive Summary
+**Reason:** Email credentials (`EMAIL_HOST_USER` and `EMAIL_HOST_PASSWORD`) are **not configured** in Render environment variables.
 
-Your authentication and email system is **properly implemented** with the following features:
-
-1. ✅ **Login** - Email/Username authentication working
-2. ✅ **Register** - User registration with email validation
-3. ✅ **Forgot Password** - OTP-based password reset via email
-4. ✅ **Contact Us** - Message submission to database
-5. ⚠️ **Email Delivery** - Requires Gmail App Password configuration
+**Impact:** When users request an OTP for password reset, the system generates the OTP but doesn't email it. Instead, it only logs to console (visible in Render logs).
 
 ---
 
-## 1. LOGIN FUNCTIONALITY
+## ✅ What's Working Locally
 
-### Implementation Status: ✅ WORKING
+- ✅ OTP generation
+- ✅ OTP storage in database
+- ✅ Email backend configured (SMTP)
+- ✅ OTP verification logic
+- ✅ Password reset flow (without email)
 
-**File:** `analyzer/views.py` (lines 182-241)
+## ❌ What's NOT Working on Render
 
-**Features:**
-- Email or username authentication
-- Custom backend: `EmailOrUsernameModelBackend`
-- Redirects to dashboard on success
-- Form validation with error handling
+- ❌ OTP email delivery
+- ❌ Automated email sending
+- ❌ Users can't receive password reset codes
 
-**Code Flow:**
-```python
-def login_view(request):
-    if request.user.is_authenticated:
-        return redirect('dashboard')
-    
-    form = EmailLoginForm(request, data=request.POST or None)
-    
-    if request.method == 'POST':
-        if form.is_valid():
-            user = form.get_user()
-            login(request, user)
-            return redirect('dashboard')
-    
-    return render(request, 'analyzer/login.html', {'form': form})
+---
+
+## 🔧 Root Cause Analysis
+
+### Email Configuration Flow
+
+```
+User Requests OTP
+    ↓
+System Checks: Is EMAIL_HOST_USER set?
+    ↓
+ON RENDER (Currently): NO
+    ↓
+System logs OTP to console ONLY
+    ↓
+User never receives email ❌
 ```
 
-**What Works:**
-- ✅ Email login
+### Why It's Broken on Render
+
+1. **render.yaml** has email variables but marked as `sync: false`
+   - This means they must be set manually in Render dashboard
+   - They are NOT currently set
+
+2. **Environment Variables Missing**
+   - `EMAIL_HOST_USER` = (not set)
+   - `EMAIL_HOST_PASSWORD` = (not set)
+
+3. **Fallback Behavior**
+   - System detects email not configured
+   - Falls back to console logging
+   - No actual email sent
+
+---
+
+## 🚀 How to Fix (5 Steps)
+
+### Step 1: Get Gmail App Password
+
+1. Go to your Gmail account: https://myaccount.google.com
+2. Click **Security** (left sidebar)
+3. Ensure **2-Step Verification** is enabled
+4. Search for or navigate to **App passwords**
+5. Select:
+   - App: **Mail**
+   - Device: **Windows Computer** (or your device)
+6. Generate password
+7. Copy the 16-character password (example: `abcd efgh ijkl mnop`)
+
+### Step 2: Log Into Render Dashboard
+
+1. Go to https://dashboard.render.com
+2. Select your **paper-analyzer** web service
+
+### Step 3: Set Environment Variables
+
+1. Click the **Environment** tab
+2. Click **Add Environment Variable** (or find existing ones)
+3. Set these two variables:
+
+| Key | Value |
+|-----|-------|
+| `EMAIL_HOST_USER` | `your-email@gmail.com` |
+| `EMAIL_HOST_PASSWORD` | `abcd efgh ijkl mnop` (from Step 1) |
+
+Note: The password may have spaces - include them as-is.
+
+### Step 4: Save and Wait for Redeployment
+
+1. Click **Save**
+2. Render will automatically redeploy your app
+3. Wait 2-3 minutes for deployment to complete
+4. Check **Deployments** tab to confirm success
+
+### Step 5: Test the Setup
+
+1. Go to https://research-nraq.onrender.com/forgot-password/
+2. Enter your email address
+3. Check your email inbox
+4. You should receive the OTP within 10 seconds
+5. Enter the OTP to reset password
+
+---
+
+## 📋 Verification Checklist
+
+After completing the fix:
+
+- [ ] Email credentials added to Render environment
+- [ ] App redeployed successfully
+- [ ] Accessed `/forgot-password/` page
+- [ ] Entered email and requested OTP
+- [ ] **Received OTP email** ✅
+- [ ] OTP accepted on verify page
+- [ ] Can set new password
+- [ ] Can login with new password
+
+---
+
+## 🔍 How to Verify It's Working
+
+### Check 1: Render Logs
+
+After setting up email and requesting OTP:
+
+1. Go to Render Dashboard → **paper-analyzer** → **Logs**
+2. Search for one of these messages:
+   - ✅ `"OTP email sent successfully"` - **GOOD!**
+   - ❌ `"LOCAL OTP SIMULATOR"` - Email NOT configured
+   - ❌ `"Failed to send OTP email"` - Credentials wrong
+
+### Check 2: Test Command
+
+You can also test locally:
+
+```bash
+# Check if email is configured
+python manage.py check_email_config
+
+# Send a test email
+python manage.py check_email_config --test your-email@gmail.com
+```
+
+### Check 3: Request Real OTP
+
+1. Go to forgot password page on production
+2. Request OTP
+3. Check inbox (including spam)
+4. If received = working! ✅
+
+---
+
+## 🛠️ Troubleshooting
+
+### "I don't see the email after 10 seconds"
+
+**Check 1:** Wrong password
+- Generate a new one: https://myaccount.google.com/apppasswords
+- Make sure 2-Step Verification is enabled first
+
+**Check 2:** Checked wrong email
+- Make sure you're checking the email you entered in forgot password form
+- Also check spam/junk folder
+
+**Check 3:** Render not redeployed
+- Check Deployments tab - should see "Success" status
+- If still deploying, wait a bit longer
+
+**Check 4:** Wrong Gmail account
+- Verify you used the Gmail app password (not your main password)
+- Verify the email address is in `EMAIL_HOST_USER`
+
+### "Render shows 'Failed to send OTP email'"
+
+**Causes:**
+1. Wrong email credentials
+2. Gmail account locked for security
+3. 2-Step Verification not enabled
+4. Firewall blocking SMTP port 587
+
+**Solutions:**
+1. Re-generate app password
+2. Try logging into Gmail in browser
+3. Enable 2-Step Verification
+4. Check if ISP blocks SMTP
+
+### "Email arrives but OTP is wrong"
+
+This shouldn't happen, but if it does:
+1. Check timestamp - OTP expires in 10 minutes
+2. Try requesting a new OTP
+3. Look at Render logs for the actual OTP
+
+---
+
+## 📧 What Users Will See
+
+After you set up email, users will:
+
+1. Click "Forgot Password"
+2. Enter their email
+3. See: "An OTP has been sent to your email"
+4. Receive email with 6-digit code
+5. Enter code on verification page
+6. Set new password
+7. Login
+
+---
+
+## 🔐 Security Notes
+
+- ✅ App passwords are separate from Gmail password
+- ✅ They only work for your app (email)
+- ✅ Credentials are environment variables (not in code)
+- ✅ Never commit credentials to git
+
+---
+
+## 📊 Email System Architecture
+
+```
+User Request
+    ↓
+OTP Generated (6 digits)
+    ↓
+OTP Stored in Database (10 min expiry)
+    ↓
+Check: Email configured?
+    ├→ YES: Send email asynchronously via SMTP ✅
+    └→ NO: Log to console (LOCAL mode) ❌
+    ↓
+User Receives Email / Sees OTP in logs
+    ↓
+User Enters OTP
+    ↓
+System Verifies OTP
+    ↓
+Password Reset Complete
+```
+
+---
+
+## 📞 Still Not Working?
+
+1. Run: `python manage.py check_email_config --verbose`
+2. Check Render logs for errors
+3. Verify credentials in Render dashboard
+4. Try different email provider (SendGrid, Mailgun)
+5. Check Django email configuration in settings.py
+
+---
+
+## 🚀 Alternative Email Providers
+
+If Gmail doesn't work, try:
+
+### SendGrid (Recommended for Production)
+- Free tier: 100 emails/day
+- More reliable
+- Better documentation
+
+### Mailgun
+- Free tier: 5,000 emails/month
+- Easy setup
+- Good for transactional email
+
+### AWS SES
+- Pay-per-use
+- Most cost-effective at scale
+- More complex setup
+
+---
+
+## ✨ Next Steps
+
+1. Get Gmail app password
+2. Add EMAIL_HOST_USER and EMAIL_HOST_PASSWORD to Render environment
+3. Wait for app to redeploy
+4. Test with forgot password flow
+5. Verify OTP email arrives
+
+**Estimated Time to Fix:** 5 minutes ⏱️
+
+---
+
+## 📚 Reference
+
+- [Gmail App Passwords](https://myaccount.google.com/apppasswords)
+- [Django Email Documentation](https://docs.djangoproject.com/en/stable/topics/email/)
+- [Render Environment Variables](https://docs.render.com/environment-variables)
+- [SMTP Configuration Guide](https://docs.djangoproject.com/en/stable/topics/email/#smtp-backend)
+
+---
+
+**Status:** Ready to be configured ⏳
+**Time to Deploy:** ~5 minutes
+**Difficulty:** Easy ⭐
 - ✅ Username login
 - ✅ Session management
 - ✅ Redirect to dashboard
