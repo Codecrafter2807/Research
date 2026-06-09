@@ -16,6 +16,7 @@ urlpatterns = [
     path('reset-password/', views.reset_password, name='reset_password'),
     path('analyze/', views.analyze_document, name='analyze_document'),
     path('result/<int:document_id>/', views.result_detail, name='result'),
+    path('bulk-results/', views.bulk_results, name='bulk_results'),
     path('ask/<int:document_id>/', views.ask_question, name='ask_question'),
     path('compare/papers/<int:doc1_id>/<int:doc2_id>/', views.compare_papers, name='compare_papers'),
     path('library/', views.library, name='library'),
@@ -23,5 +24,9 @@ urlpatterns = [
     path('export/<int:document_id>/<str:export_format>/', views.export_document, name='export'),
     path('email/<int:document_id>/', views.email_report, name='email_report'),
     path('feedback/<int:document_id>/', views.submit_feedback, name='feedback'),
+    path('notes/<int:document_id>/save/', views.save_notes, name='save_notes'),
+    path('notes/<int:document_id>/add_tag/', views.add_tag, name='add_tag'),
+    path('notes/<int:document_id>/remove_tag/', views.remove_tag, name='remove_tag'),
+    path('notes/<int:document_id>/similar/', views.similar_papers, name='similar_papers'),
     path('health/', views.health_check, name='health'),
 ]

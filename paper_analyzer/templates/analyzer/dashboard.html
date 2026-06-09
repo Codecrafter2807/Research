@@ -8,30 +8,6 @@
     --glass-border: rgba(255,255,255,0.45);
     --glass-shadow: 0 8px 32px rgba(31,38,135,0.07);
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --glass-bg: rgba(30, 41, 59, 0.7);
-      --glass-border: rgba(255, 255, 255, 0.1);
-      --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    }
-    .stat-value, .section-title, .recent-item-info h6, .quick-stat-value {
-      color: var(--text-primary) !important;
-    }
-    .stat-label, .recent-item-info small, .quick-stat-label {
-      color: var(--text-muted) !important;
-    }
-    .recent-item {
-      background: rgba(30, 41, 59, 0.5) !important;
-    }
-    .recent-item:hover {
-      background: rgba(45, 55, 72, 0.7) !important;
-    }
-    .keyword-tag, .quick-link-btn {
-      background: rgba(30, 41, 59, 0.8) !important;
-      border-color: var(--border-color) !important;
-      color: var(--text-secondary) !important;
-    }
-  }
   .dashboard-wrapper {
     min-height: calc(100vh - 70px);
     padding-top: 1rem;
@@ -46,7 +22,6 @@
     border-radius: 24px;
     margin-bottom: 2rem;
     position: relative;
-    overflow: hidden;
     box-shadow: 0 15px 35px rgba(99,102,241,0.2);
   }
   .dashboard-header::before {
@@ -55,6 +30,7 @@
     width:300px;height:300px;
     background:rgba(255,255,255,0.1);
     border-radius:50%;filter:blur(50px);
+    pointer-events: none;
   }
   .welcome-avatar {
     width:72px;height:72px;
@@ -131,17 +107,18 @@
   .chart-container{position:relative;height:200px;}
   /* ── Mobile ── */
   @media(max-width:768px){
-    .dashboard-header{padding:1.25rem 1.25rem;}
-    .welcome-avatar{width:56px;height:56px;font-size:1.4rem;border-radius:14px;}
-    .stat-value{font-size:1.4rem;}
-    .section-card{padding:1.25rem;}
-    .dashboard-header h2{font-size:1.3rem;}
+    .dashboard-header{padding:1.25rem;}
+    .welcome-avatar{width:52px;height:52px;font-size:1.3rem;border-radius:12px;}
+    .stat-value{font-size:1.3rem;}
+    .section-card{padding:1.1rem;}
+    .dashboard-header h2{font-size:1.2rem !important;}
   }
   @media(max-width:576px){
-    .stat-card{padding:1.1rem;}
-    .stat-icon{width:42px;height:42px;font-size:1.1rem;}
-    .recent-item{flex-direction:column;align-items:flex-start;gap:.5rem;}
+    .stat-card{padding:1rem;}
+    .stat-icon{width:40px;height:40px;font-size:1rem;}
+    .recent-item{flex-direction:column;align-items:flex-start;gap:.4rem;}
     .recent-item-info small{flex-wrap:wrap;}
+    .quick-link-btn{padding:.75rem;}
   }
 </style>
 {% endblock %}
@@ -151,28 +128,28 @@
   <div class="container pb-5">
 
     <!-- ── Header ── -->
-    <div class="dashboard-header d-flex justify-content-between align-items-center flex-wrap gap-3">
-      <div class="d-flex align-items-center gap-3">
-        <div class="welcome-avatar">
+    <div class="dashboard-header" style="position: relative;">
+      <div class="d-flex align-items-center gap-3 mb-3" style="position: relative; z-index: 2;">
+        <div class="welcome-avatar flex-shrink-0">
           {% if profile.avatar %}
             <img src="{{ profile.avatar.url }}" alt="avatar">
           {% else %}
             {{ avatar_initial }}
           {% endif %}
         </div>
-        <div>
-          <h2 class="mb-1 fw-bold" style="font-size:1.5rem;">Hello, {{ display_name }}! 👋</h2>
-          <div class="d-flex flex-wrap gap-3 opacity-90 mt-1">
-            <span class="small d-flex align-items-center gap-1"><i class="fas fa-envelope"></i> {{ user.email }}</span>
-            <span class="small d-flex align-items-center gap-1"><i class="fas fa-calendar-check"></i> Member since {{ member_since|date:"M Y" }}</span>
+        <div class="min-w-0">
+          <h2 class="mb-1 fw-bold" style="font-size:1.4rem; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,0.2); word-break:break-word;">Hello, {{ display_name|default:"User" }}! 👋</h2>
+          <div class="d-flex flex-wrap gap-2 opacity-90" style="font-size:0.8rem;">
+            <span class="d-flex align-items-center gap-1"><i class="fas fa-envelope"></i> {{ user.email|default:"No email" }}</span>
+            <span class="d-flex align-items-center gap-1"><i class="fas fa-calendar-check"></i> Since {% if member_since %}{{ member_since|date:"M Y" }}{% else %}Recently{% endif %}</span>
           </div>
         </div>
       </div>
-      <div class="d-flex gap-2 flex-wrap">
-        <a href="{% url 'profile' %}" class="btn btn-light btn-sm rounded-pill px-3 py-2 fw-600">
+      <div class="d-grid gap-2" style="grid-template-columns: 1fr 1fr; position: relative; z-index: 2;">
+        <a href="{% url 'profile' %}" class="btn btn-light btn-sm rounded-pill fw-600 text-center">
           <i class="fas fa-user-edit me-1 text-primary"></i>Edit Profile
         </a>
-        <a href="{% url 'upload' %}" class="btn btn-light btn-sm rounded-pill px-3 py-2 fw-600">
+        <a href="{% url 'upload' %}" class="btn btn-light btn-sm rounded-pill fw-600 text-center">
           <i class="fas fa-wand-magic-sparkles me-1 text-primary"></i>Analyze Paper
         </a>
       </div>

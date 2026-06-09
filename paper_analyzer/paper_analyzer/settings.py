@@ -16,17 +16,22 @@ SECRET_KEY = os.getenv(
 )
 
 # DEBUG = False # ALWAYS FALSE on Render
-DEBUG = False
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+
+_render_host = os.getenv('RENDER_EXTERNAL_HOSTNAME', '')
 ALLOWED_HOSTS = [
-    "research-nraq.onrender.com",
     ".onrender.com",
     "localhost",
     "127.0.0.1",
-
 ]
+if _render_host:
+    ALLOWED_HOSTS.append(_render_host)
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://research-nraq.onrender.com",]
+    "https://*.onrender.com",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
 
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -131,7 +136,8 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [
     BASE_DIR / 'static'
 ]
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+if not DEBUG:
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # ======================
 # MEDIA
@@ -221,7 +227,7 @@ LOGGING = {
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
-# ⚠️ safer than DENY for many templates
+#  safer than DENY for many templates
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
 # ======================
