@@ -1,53 +1,113 @@
 # Email Setup - Quick Start Guide
 
-## ⚡ 5-Minute Setup
+## 🚨 Current Issue on Render
+
+Your app is currently **NOT sending OTP emails**. The `EMAIL_HOST_USER` and `EMAIL_HOST_PASSWORD` environment variables are not set on Render.
+
+This means when a user requests an OTP, it only gets logged to the console (visible in Render logs) instead of being emailed.
+
+## ⚡ 5-Minute Setup on Render
 
 ### Step 1: Get Gmail App Password
 
 1. Go to https://myaccount.google.com/apppasswords
-2. Select "Mail" → "Windows Computer"
-3. Copy the 16-character password (with spaces)
+2. Ensure 2-Step Verification is enabled
+3. Select:
+   - App: **Mail**
+   - Device: **Windows Computer** (or your device)
+4. Google will generate a 16-character password
+5. Copy the entire password (including spaces)
 
-### Step 2: Update .env File
+**Example:** `abcd efgh ijkl mnop`
+
+### Step 2: Set Environment Variables on Render
+
+1. Go to [Render Dashboard](https://dashboard.render.com)
+2. Select your **paper-analyzer** web service
+3. Click **Environment** tab
+4. Add these two variables:
+
+```
+EMAIL_HOST_USER: your-email@gmail.com
+EMAIL_HOST_PASSWORD: abcd efgh ijkl mnop  (the 16-char password from Step 1)
+```
+
+5. Click **Save** - App will auto-redeploy
+6. Wait for deployment to complete (~2 minutes)
+
+### Step 3: Test the Setup
+
+After deployment:
+
+1. Go to https://research-nraq.onrender.com/forgot-password/
+2. Enter your email address
+3. Check your email inbox for the OTP (usually arrives within 10 seconds)
+4. Enter the OTP to complete password reset
+
+### Step 4: Check Logs if Email Doesn't Arrive
+
+If no email:
+
+1. Go to Render Dashboard → **paper-analyzer** → **Logs**
+2. Look for one of these messages:
+   - ✅ `"OTP email sent successfully"` - Email working!
+   - ❌ `"LOCAL OTP SIMULATOR"` - Email NOT configured
+   - ❌ `"Failed to send OTP email"` - Credentials wrong or connection error
+
+## 📋 Local Development Setup
+
+To test email locally before deploying:
+
+### Option 1: Use Console (Email Goes to Console Output)
 
 ```bash
-# Copy .env.example to .env (if not already done)
-cp .env.example .env
+# No setup needed! OTP will print to console:
+# =========================================
+#   OTP FOR user@example.com: 123456
+# =========================================
 ```
 
-Edit `.env`:
-```
+### Option 2: Set Real Email (Test With Live Email)
+
+Create a `.env` file:
+
+```bash
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
 EMAIL_USE_TLS=True
 EMAIL_HOST_USER=your-email@gmail.com
-EMAIL_HOST_PASSWORD=xxxx xxxx xxxx xxxx
+EMAIL_HOST_PASSWORD=abcd efgh ijkl mnop  (16-char app password)
 DEFAULT_FROM_EMAIL=PaperAIzer <your-email@gmail.com>
 ```
 
-### Step 3: Test Locally
+Run locally:
 
 ```bash
-# Start Django shell
+python manage.py runserver
+```
+
+Then test forgot password - OTP will be emailed to you!
+
+### Option 3: Quick Email Test
+
+```bash
 python manage.py shell
 
-# Test email sending
+# In Django shell:
 from django.core.mail import send_mail
-send_mail(
+result = send_mail(
     'Test Email',
-    'This is a test email from PaperAIzer',
+    'This is a test from PaperAIzer',
     'your-email@gmail.com',
     ['recipient@example.com'],
     fail_silently=False,
 )
+print(f"Emails sent: {result}")  # Should print: Emails sent: 1
 ```
 
-If successful, you'll see: `1` (meaning 1 email sent)
+If you get an error, check your credentials.
 
-### Step 4: Test Forgot Password Flow
-
-1. Go to http://localhost:8000/forgot-password/
-2. Enter your email
+## 🔧 Troubleshooting
 3. Check console for OTP
 4. Go to http://localhost:8000/verify-otp/
 5. Enter OTP
